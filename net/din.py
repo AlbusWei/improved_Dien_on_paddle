@@ -123,8 +123,21 @@ class DINLayer(nn.Layer):
                 self.add_sublayer('act_%d' % i, act)
                 self.con_layer.append(act)
 
-    def forward(self, hist_item_seq, hist_cat_seq, target_item, target_cat,
-                label, mask, target_item_seq, target_cat_seq):
+    # define feeds which convert numpy of batch data to paddle.tensor
+    def create_feeds(self, batch):
+        hist_item_seq = batch[0]
+        hist_cat_seq = batch[1]
+        target_item = batch[2]
+        target_cat = batch[3]
+        label = paddle.reshape(batch[4], [-1, 1])
+        mask = batch[5]
+        target_item_seq = batch[6]
+        target_cat_seq = batch[7]
+        return hist_item_seq, hist_cat_seq, target_item, target_cat, label, mask, target_item_seq, target_cat_seq
+
+    def forward(self, batch):
+        hist_item_seq, hist_cat_seq, target_item, target_cat, label, mask, target_item_seq, target_cat_seq \
+            = self.create_feeds(batch)
         hist_item_emb = self.hist_item_emb_attr(hist_item_seq)
         hist_cat_emb = self.hist_cat_emb_attr(hist_cat_seq)
         target_item_emb = self.target_item_emb_attr(target_item)

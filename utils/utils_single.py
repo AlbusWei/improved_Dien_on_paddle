@@ -96,8 +96,8 @@ def create_data_loader(config, place, RecDataset, mode="train"):
         batch_size = config.get('runner.infer_batch_size', None)
         # reader_path = config.get('runner.infer_reader_path', 'reader')
     num_workers = config.get('runner.num_workers', 0)
-    config_abs_dir = config.get("config_abs_dir", None)
-    data_dir = os.path.join(config_abs_dir, data_dir)
+    # config_abs_dir = config.get("config_abs_dir", "")
+    # data_dir = os.path.join(config_abs_dir, data_dir)
     file_list = [os.path.join(data_dir, x) for x in os.listdir(data_dir)]
     user_define_reader = config.get('runner.user_define_reader', False)
     # logger.info("reader path:{}".format(reader_path))

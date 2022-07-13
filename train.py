@@ -3,8 +3,8 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 import paddle
-from paddle.metric import Accuracy
-from paddle.nn import CrossEntropyLoss
+from paddle.metric import Accuracy, Auc
+from paddle.nn import CrossEntropyLoss, NLLLoss
 from utils.utils_single import load_yaml, create_data_loader
 from dataset import DinDataset, DienDataset
 from net.din import DINLayer
@@ -31,7 +31,7 @@ def train(config, model_method, train_loader, valid_loader, resume_train=False, 
     item_count = config.get("hyper_parameters.item_count", 63001)
     cat_count = config.get("hyper_parameters.cat_count", 801)
     model = paddle.Model(model_method(item_emb_size, cat_emb_size, act, is_sparse,
-                 use_DataLoader, item_count, cat_count))
+                                      use_DataLoader, item_count, cat_count))
 
     save_dir = config.get("runner.model_save_path", "checkpoint")
 
@@ -41,11 +41,25 @@ def train(config, model_method, train_loader, valid_loader, resume_train=False, 
     lr = config.get("hyper_parameters.optimizer.learning_rate_base_lr", 0.01)
     optimizer = paddle.optimizer.SGD(learning_rate=lr, parameters=model.parameters())
 
+    # 可视化观察网络结构
     dataiter = iter(train_loader)
-    batch, label = dataiter.next()
+    batch = dataiter.next()
     model.summary(batch)
 
+    model.prepare(optimizer, NLLLoss(), Accuracy())
+
+    model.fit(train_loader,
+              valid_loader,
+              epochs=EPOCHS,
+              # batch_size=BATCH_SIZE,
+              eval_freq=5,  # 多少epoch 进行验证
+              save_freq=5,  # 多少epoch 进行模型保存
+              log_freq=100,  # 多少steps 打印训练信息
+              save_dir=save_dir,
+              callbacks=callback)
+
     return model
+
 
 def main():
     if len(sys.argv) > 1:
