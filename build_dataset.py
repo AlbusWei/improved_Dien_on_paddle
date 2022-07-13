@@ -71,8 +71,11 @@ def build_dataset(class_name="Electronics"):
             else:
                 fout.write(';')
 
+    train_path = os.path.join("train", class_name+"_train.txt")
+    test_path = os.path.join("test", class_name + "_test.txt")
+
     print("make train data")
-    with open("paddle_train.txt", "w") as fout:
+    with open(train_path, "w") as fout:
         for line in train_set:
             history = line[1]
             target = line[2]
@@ -85,7 +88,7 @@ def build_dataset(class_name="Electronics"):
             fout.write(str(label) + "\n")
 
     print("make test data")
-    with open("paddle_test.txt", "w") as fout:
+    with open(test_path, "w") as fout:
         for line in test_set:
             history = line[1]
             target = line[2]
@@ -104,7 +107,7 @@ def build_dataset(class_name="Electronics"):
             fout.write("0\n")
 
     print("make config data")
-    with open('config.txt', 'w') as f:
+    with open(class_name+'_config.txt', 'w') as f:
         f.write(str(user_count) + "\n")
         f.write(str(item_count) + "\n")
         f.write(str(cate_count) + "\n")
