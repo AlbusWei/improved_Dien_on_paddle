@@ -1,28 +1,36 @@
 import os
 import sys
+import time
+import logging
+
 import matplotlib.pyplot as plt
 import numpy as np
 import paddle
 from paddle.metric import Accuracy, Auc
 from paddle.nn import CrossEntropyLoss, NLLLoss
-from utils.utils_single import load_yaml, create_data_loader
+from visualdl import LogWriter
+from utils.utils_single import load_yaml, create_data_loader, save_model
 from dataset import DinDataset, DienDataset
-from net.din import DINLayer
-from net.dien import DIENLayer
+import net.din
+import net.dien
 
 model_dict = {
     "din": {
-        "function": DINLayer,
+        "function": net.din.DINLayer,
         "dataset": DinDataset
     },
     "dien": {
-        "function": DIENLayer,
+        "function": net.dien.DIENLayer,
         "dataset": DienDataset
     }
 }
 
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def train(config, model_method, train_loader, valid_loader, resume_train=False, EPOCHS=100, callback=None):
+
+def train(config, model_method, train_dataloader, valid_loader, resume_train=False, EPOCHS=100, print_interval=100, tensor_print_dict=None, callback=None):
     item_emb_size = config.get("hyper_parameters.item_emb_size", 64)
     cat_emb_size = config.get("hyper_parameters.cat_emb_size", 64)
     act = config.get("hyper_parameters.act", "sigmoid")
@@ -30,8 +38,10 @@ def train(config, model_method, train_loader, valid_loader, resume_train=False, 
     use_DataLoader = True
     item_count = config.get("hyper_parameters.item_count", 63001)
     cat_count = config.get("hyper_parameters.cat_count", 801)
-    model = paddle.Model(model_method(item_emb_size, cat_emb_size, act, is_sparse,
-                                      use_DataLoader, item_count, cat_count))
+    # model = paddle.Model(model_method(item_emb_size, cat_emb_size, act, is_sparse,
+    #                                   use_DataLoader, item_count, cat_count))
+    model = model_method(item_emb_size, cat_emb_size, act, is_sparse,
+                                      use_DataLoader, item_count, cat_count)
 
     save_dir = config.get("runner.model_save_path", "checkpoint")
 
@@ -42,21 +52,135 @@ def train(config, model_method, train_loader, valid_loader, resume_train=False, 
     optimizer = paddle.optimizer.SGD(learning_rate=lr, parameters=model.parameters())
 
     # 可视化观察网络结构
-    dataiter = iter(train_loader)
-    batch = dataiter.next()
-    model.summary(batch)
+    # dataiter = iter(train_loader)
+    # batch = dataiter.next()
+    # model.summary(batch)
+    #
+    # model.prepare(optimizer, NLLLoss(), Accuracy())
+    #
+    # model.fit(train_loader,
+    #           valid_loader,
+    #           epochs=EPOCHS,
+    #           # batch_size=BATCH_SIZE,
+    #           eval_freq=5,  # 多少epoch 进行验证
+    #           save_freq=5,  # 多少epoch 进行模型保存
+    #           log_freq=100,  # 多少steps 打印训练信息
+    #           save_dir=save_dir,
+    #           callbacks=callback)
 
-    model.prepare(optimizer, NLLLoss(), Accuracy())
+    # Create a log_visual object and store the data in the path
+    log_visual = LogWriter("checkpoint/")
 
-    model.fit(train_loader,
-              valid_loader,
-              epochs=EPOCHS,
-              # batch_size=BATCH_SIZE,
-              eval_freq=5,  # 多少epoch 进行验证
-              save_freq=5,  # 多少epoch 进行模型保存
-              log_freq=100,  # 多少steps 打印训练信息
-              save_dir=save_dir,
-              callbacks=callback)
+    # use fleet run collective
+    # if use_fleet:
+    #     from paddle.distributed import fleet
+    #     strategy = fleet.DistributedStrategy()
+    #     fleet.init(is_collective=True, strategy=strategy)
+    #     optimizer = fleet.distributed_optimizer(optimizer)
+    #     dy_model = fleet.distributed_model(dy_model)
+
+    logger.info("read data")
+
+    last_epoch_id = config.get("last_epoch", -1)
+    step_num = 0
+
+    for epoch_id in range(last_epoch_id + 1, EPOCHS):
+        # set train mode
+        model.train()
+        metric_list, metric_list_name = model.create_metrics()
+        # auc_metric = paddle.metric.Auc("ROC")
+        epoch_begin = time.time()
+        interval_begin = time.time()
+        train_reader_cost = 0.0
+        train_run_cost = 0.0
+        total_samples = 0
+        reader_start = time.time()
+
+        # we will drop the last incomplete batch when dataset size is not divisible by the batch size
+        assert any(train_dataloader(
+        )), "train_dataloader is null, please ensure batch size < dataset size!"
+
+        for batch_id, batch in enumerate(train_dataloader()):
+            train_reader_cost += time.time() - reader_start
+            optimizer.clear_grad()
+            train_start = time.time()
+            batch_size = len(batch[0])
+
+            loss, metric_list, tensor_print_dict = model.train_forward(
+                metric_list, batch, config)
+
+            loss.backward()
+            optimizer.step()
+            train_run_cost += time.time() - train_start
+            total_samples += batch_size
+
+            if batch_id % print_interval == 0:
+                metric_str = ""
+                for metric_id in range(len(metric_list_name)):
+                    metric_str += (
+                            metric_list_name[metric_id] +
+                            ":{:.6f}, ".format(metric_list[metric_id].accumulate())
+                    )
+                    log_visual.add_scalar(
+                        tag="train/" + metric_list_name[metric_id],
+                        step=step_num,
+                        value=metric_list[metric_id].accumulate())
+                tensor_print_str = ""
+                if tensor_print_dict is not None:
+                    for var_name, var in tensor_print_dict.items():
+                        tensor_print_str += (
+                                "{}:".format(var_name) +
+                                str(var.numpy()).strip("[]") + ",")
+                        log_visual.add_scalar(
+                            tag="train/" + var_name,
+                            step=step_num,
+                            value=var.numpy())
+                logger.info(
+                    "epoch: {}, batch_id: {}, ".format(
+                        epoch_id, batch_id) + metric_str + tensor_print_str +
+                    " avg_reader_cost: {:.5f} sec, avg_batch_cost: {:.5f} sec, avg_samples: {:.5f}, ips: {:.5f} ins/s".
+                    format(train_reader_cost / print_interval, (
+                            train_reader_cost + train_run_cost) / print_interval,
+                           total_samples / print_interval, total_samples / (
+                                   train_reader_cost + train_run_cost)))
+                train_reader_cost = 0.0
+                train_run_cost = 0.0
+                total_samples = 0
+            reader_start = time.time()
+            step_num = step_num + 1
+
+        metric_str = ""
+        for metric_id in range(len(metric_list_name)):
+            metric_str += (
+                    metric_list_name[metric_id] +
+                    ": {:.6f},".format(metric_list[metric_id].accumulate()))
+            metric_list[metric_id].reset()
+
+        tensor_print_str = ""
+        if tensor_print_dict is not None:
+            for var_name, var in tensor_print_dict.items():
+                tensor_print_str += (
+                        "{}:".format(var_name) + str(var.numpy()).strip("[]") + ","
+                )
+
+        logger.info("epoch: {} done, ".format(epoch_id) + metric_str +
+                    tensor_print_str + " epoch time: {:.2f} s".format(
+            time.time() - epoch_begin))
+
+        save_model(
+            model, optimizer, save_dir, epoch_id, prefix='rec')
+        # if use_fleet:
+        #     trainer_id = paddle.distributed.get_rank()
+        #     if trainer_id == 0:
+        #         save_model(
+        #             model,
+        #             optimizer,
+        #             model_save_path,
+        #             epoch_id,
+        #             prefix='rec')
+        # else:
+        #     save_model(
+        #         model, optimizer, model_save_path, epoch_id, prefix='rec')
 
     return model
 

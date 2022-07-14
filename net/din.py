@@ -2,6 +2,20 @@ import paddle
 import paddle.nn as nn
 import math
 import numpy as np
+from paddle.nn.functional import nll_loss, binary_cross_entropy_with_logits
+
+
+def create_model(config):
+    item_emb_size = config.get("hyper_parameters.item_emb_size", 64)
+    cat_emb_size = config.get("hyper_parameters.cat_emb_size", 64)
+    act = config.get("hyper_parameters.act", "sigmoid")
+    is_sparse = config.get("hyper_parameters.is_sparse", False)
+    use_DataLoader = config.get("hyper_parameters.use_DataLoader", False)
+    item_count = config.get("hyper_parameters.item_count", 63001)
+    cat_count = config.get("hyper_parameters.cat_count", 801)
+    din_model = DINLayer(item_emb_size, cat_emb_size, act, is_sparse,
+                         use_DataLoader, item_count, cat_count)
+    return din_model
 
 
 class DINLayer(nn.Layer):
@@ -134,6 +148,39 @@ class DINLayer(nn.Layer):
         target_item_seq = batch[6]
         target_cat_seq = batch[7]
         return hist_item_seq, hist_cat_seq, target_item, target_cat, label, mask, target_item_seq, target_cat_seq
+
+    # define metrics such as auc/acc
+    # multi-task need to define multi metric
+    def create_metrics(self):
+        metrics_list_name = ["auc"]
+        # auc_metric = paddle.metric.Auc(num_thresholds=self.bucket)
+        auc_metric = paddle.metric.Auc("ROC")
+        metrics_list = [auc_metric]
+        return metrics_list, metrics_list_name
+
+    def train_forward(self, metrics_list, batch_data, config, loss_function=binary_cross_entropy_with_logits):
+        label = paddle.reshape(batch_data[4], [-1, 1])
+        raw_pred = self.forward(batch_data)
+        loss = loss_function(raw_pred, label)
+        predict = paddle.nn.functional.sigmoid(raw_pred)
+        predict_2d = paddle.concat([1 - predict, predict], 1)
+        label_int = paddle.cast(label, 'int64')
+        metrics_list[0].update(
+            preds=predict_2d.numpy(), labels=label_int.numpy())
+
+        print_dict = {'loss': loss}
+        return loss, metrics_list, print_dict
+
+    def infer_forward(self, metrics_list, batch_data, config):
+        raw_pred = self.forward(batch_data)
+        label = paddle.reshape(batch_data[4], [-1, 1])
+        predict = paddle.nn.functional.sigmoid(raw_pred)
+        predict_2d = paddle.concat([1 - predict, predict], 1)
+        label_int = paddle.cast(label, 'int64')
+        metrics_list[0].update(
+            preds=predict_2d.numpy(), labels=label_int.numpy())
+
+        return metrics_list, None
 
     def forward(self, batch):
         hist_item_seq, hist_cat_seq, target_item, target_cat, label, mask, target_item_seq, target_cat_seq \

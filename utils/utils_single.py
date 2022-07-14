@@ -204,3 +204,12 @@ def auc(stat_pos, stat_neg, scope, util):
         auc_value = area / (pos * neg)
 
     return auc_value
+
+
+def save_model(net, optimizer, model_path, epoch_id, prefix='rec'):
+    model_path = os.path.join(model_path, str(epoch_id))
+    _mkdir_if_not_exist(model_path)
+    model_prefix = os.path.join(model_path, prefix)
+    paddle.save(net.state_dict(), model_prefix + ".pdparams")
+    paddle.save(optimizer.state_dict(), model_prefix + ".pdopt")
+    logger.info("Already save model in {}".format(model_path))
