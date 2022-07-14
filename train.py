@@ -87,9 +87,9 @@ def train(config, model_method, train_dataloader, valid_loader, resume_train=Fal
     last_epoch_id = config.get("last_epoch", -1)
     step_num = 0
 
+    model.train()
     for epoch_id in range(last_epoch_id + 1, EPOCHS):
         # set train mode
-        model.train()
         metric_list, metric_list_name = model.create_metrics()
         # auc_metric = paddle.metric.Auc("ROC")
         epoch_begin = time.time()
