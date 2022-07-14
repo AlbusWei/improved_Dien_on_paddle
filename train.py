@@ -34,6 +34,7 @@ def train(config, model_method, train_dataloader, valid_loader, resume_train=Fal
     item_emb_size = config.get("hyper_parameters.item_emb_size", 64)
     cat_emb_size = config.get("hyper_parameters.cat_emb_size", 64)
     act = config.get("hyper_parameters.act", "sigmoid")
+    print_interval = config.get("runner.print_interval", None)
     is_sparse = False
     use_DataLoader = True
     item_count = config.get("hyper_parameters.item_count", 63001)
@@ -187,6 +188,100 @@ def train(config, model_method, train_dataloader, valid_loader, resume_train=Fal
     return model
 
 
+def test(config, model_method, test_dataloader, model=None, tensor_print_dict=None):
+    if model is None:
+        item_emb_size = config.get("hyper_parameters.item_emb_size", 64)
+        cat_emb_size = config.get("hyper_parameters.cat_emb_size", 64)
+        act = config.get("hyper_parameters.act", "sigmoid")
+        is_sparse = False
+        use_DataLoader = True
+        item_count = config.get("hyper_parameters.item_count", 63001)
+        cat_count = config.get("hyper_parameters.cat_count", 801)
+        model = model_method(item_emb_size, cat_emb_size, act, is_sparse,
+                             use_DataLoader, item_count, cat_count)
+
+    print_interval = config.get("runner.print_interval", None)
+    infer_batch_size = config.get("runner.infer_batch_size", None)
+    model_load_path = config.get("runner.infer_load_path", "model_output")
+    start_epoch = config.get("runner.infer_start_epoch", 0)
+    end_epoch = config.get("runner.infer_end_epoch", 10)
+
+    logger.info("read data")
+    epoch_begin = time.time()
+    interval_begin = time.time()
+
+    metric_list, metric_list_name = model.create_metrics()
+    step_num = 0
+
+    for epoch_id in range(start_epoch, end_epoch):
+        logger.info("load model epoch {}".format(epoch_id))
+        model_path = os.path.join(model_load_path, str(epoch_id))
+        load_model(model_path, model)
+        model.eval()
+        infer_reader_cost = 0.0
+        infer_run_cost = 0.0
+        reader_start = time.time()
+
+        # we will drop the last incomplete batch when dataset size is not divisible by the batch size
+        assert any(test_dataloader(
+        )), "test_dataloader is null, please ensure batch size < dataset size!"
+
+        for batch_id, batch in enumerate(test_dataloader()):
+            infer_reader_cost += time.time() - reader_start
+            infer_start = time.time()
+            batch_size = len(batch[0])
+
+            metric_list, tensor_print_dict = model.infer_forward(
+                metric_list, batch, config)
+
+            infer_run_cost += time.time() - infer_start
+
+            if batch_id % print_interval == 0:
+                tensor_print_str = ""
+                if tensor_print_dict is not None:
+                    for var_name, var in tensor_print_dict.items():
+                        tensor_print_str += (
+                                "{}:".format(var_name) +
+                                str(var.numpy()).strip("[]") + ",")
+                metric_str = ""
+                for metric_id in range(len(metric_list_name)):
+                    metric_str += (
+                            metric_list_name[metric_id] +
+                            ": {:.6f},".format(metric_list[metric_id].accumulate())
+                    )
+                logger.info(
+                    "epoch: {}, batch_id: {}, ".format(
+                        epoch_id, batch_id) + metric_str + tensor_print_str +
+                    " avg_reader_cost: {:.5f} sec, avg_batch_cost: {:.5f} sec, avg_samples: {:.5f}, ips: {:.2f} ins/s".
+                    format(infer_reader_cost / print_interval, (
+                            infer_reader_cost + infer_run_cost) / print_interval,
+                           infer_batch_size, print_interval * batch_size / (
+                                   time.time() - interval_begin)))
+                interval_begin = time.time()
+                infer_reader_cost = 0.0
+                infer_run_cost = 0.0
+            step_num = step_num + 1
+            reader_start = time.time()
+
+        metric_str = ""
+        for metric_id in range(len(metric_list_name)):
+            metric_str += (
+                    metric_list_name[metric_id] +
+                    ": {:.6f},".format(metric_list[metric_id].accumulate()))
+            metric_list[metric_id].reset()
+
+        tensor_print_str = ""
+        if tensor_print_dict is not None:
+            for var_name, var in tensor_print_dict.items():
+                tensor_print_str += (
+                        "{}:".format(var_name) + str(var.numpy()).strip("[]") + ","
+                )
+
+        logger.info("epoch: {} done, ".format(epoch_id) + metric_str +
+                    tensor_print_str + " epoch time: {:.2f} s".format(
+            time.time() - epoch_begin))
+        epoch_begin = time.time()
+
 def main():
     if len(sys.argv) > 1:
         config = load_yaml(str(sys.argv[1]))
@@ -208,6 +303,8 @@ def main():
     Epoch = config.get("runner.epochs", 8)
 
     model = train(config, model_method, train_dataloader, test_dataloader, EPOCHS=Epoch, callback=callback)
+
+
 
 
 if __name__ == '__main__':

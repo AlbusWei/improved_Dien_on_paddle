@@ -20,13 +20,13 @@ runner:
   use_auc: True
   train_batch_size: 32
   epochs: 8
-  print_interval: 1000
+  print_interval: 2000
   #model_init_path: "output_model/0" # init model
   model_save_path: "checkpoint/din/"
   infer_batch_size: 32
   infer_reader_path: "dinReader" # importlib format
   test_data_dir:  "./test" # "../../../datasets/amazonElec_Din/test"
-  infer_load_path: "output_model_all_din"
+  infer_load_path: "./checkpoint/din/"
   infer_start_epoch: 6
   infer_end_epoch: 8
 
