@@ -131,7 +131,7 @@ class DinDataset(IterableDataset):
 
 class DienDataset(IterableDataset):
     def __init__(self, file_list, config):
-        super(RecDataset, self).__init__()
+        super(DienDataset, self).__init__()
         self.file_list = file_list
         self.config = config
         self.init()

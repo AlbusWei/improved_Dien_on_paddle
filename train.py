@@ -9,7 +9,7 @@ import paddle
 from paddle.metric import Accuracy, Auc
 from paddle.nn import CrossEntropyLoss, NLLLoss
 from visualdl import LogWriter
-from utils.utils_single import load_yaml, create_data_loader, save_model
+from utils.utils_single import load_yaml, create_data_loader, save_model, load_model
 from dataset import DinDataset, DienDataset
 import net.din
 import net.dien
@@ -38,6 +38,7 @@ def train(config, model_method, train_dataloader, valid_loader, resume_train=Fal
     use_DataLoader = True
     item_count = config.get("hyper_parameters.item_count", 63001)
     cat_count = config.get("hyper_parameters.cat_count", 801)
+    model_init_path = config.get("runner.model_init_path", None)
     # model = paddle.Model(model_method(item_emb_size, cat_emb_size, act, is_sparse,
     #                                   use_DataLoader, item_count, cat_count))
     model = model_method(item_emb_size, cat_emb_size, act, is_sparse,
@@ -45,8 +46,9 @@ def train(config, model_method, train_dataloader, valid_loader, resume_train=Fal
 
     save_dir = config.get("runner.model_save_path", "checkpoint")
 
-    if resume_train:
-        model.load(os.path.join(save_dir, "final"), skip_mismatch=True)
+    if resume_train and model_init_path is not None:
+        load_model(model_init_path, model)
+        # model.load(os.path.join(save_dir, "final"), skip_mismatch=True)
 
     lr = config.get("hyper_parameters.optimizer.learning_rate_base_lr", 0.01)
     optimizer = paddle.optimizer.SGD(learning_rate=lr, parameters=model.parameters())
@@ -69,7 +71,7 @@ def train(config, model_method, train_dataloader, valid_loader, resume_train=Fal
     #           callbacks=callback)
 
     # Create a log_visual object and store the data in the path
-    log_visual = LogWriter("checkpoint/")
+    log_visual = LogWriter("log/")
 
     # use fleet run collective
     # if use_fleet:

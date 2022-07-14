@@ -15,7 +15,8 @@ import paddle
 import paddle.nn as nn
 import math
 import numpy as np
-import paddle.nn.functional as F
+from paddle.nn.functional import nll_loss, binary_cross_entropy_with_logits
+
 
 
 class DIENLayer(nn.Layer):
@@ -421,9 +422,56 @@ class StaticDIENLayer(nn.Layer):
 
         #------------------------- attention net --------------------------
 
-    def forward(self, hist_item_seq, hist_cat_seq, target_item, target_cat,
-                label, mask, target_item_seq, target_cat_seq,
-                neg_hist_item_seq, neg_hist_cat_seq):
+    # define feeds which convert numpy of batch data to paddle.tensor
+    def create_feeds(self, batch):
+        hist_item_seq = batch[0]
+        hist_cat_seq = batch[1]
+        target_item = batch[2]
+        target_cat = batch[3]
+        label = paddle.reshape(batch[4], [-1, 1])
+        mask = batch[5]
+        target_item_seq = batch[6]
+        target_cat_seq = batch[7]
+        neg_hist_item_seq = batch[8]
+        neg_hist_cat_seq = batch[9]
+        return hist_item_seq, hist_cat_seq, target_item, target_cat, label, mask, target_item_seq, target_cat_seq, neg_hist_item_seq, neg_hist_cat_seq
+
+
+    # define metrics such as auc/acc
+    # multi-task need to define multi metric
+    def create_metrics(self):
+        metrics_list_name = ["auc"]
+        auc_metric = paddle.metric.Auc("ROC")
+        metrics_list = [auc_metric]
+        return metrics_list, metrics_list_name
+
+    # construct train forward phase
+    def train_forward(self, metrics_list, batch_data, config):
+        raw_pred, aux_loss = self.forward(batch_data)
+        label = paddle.reshape(batch_data[4], [-1, 1])
+        loss = self.create_loss(raw_pred, label)
+        cost = loss + aux_loss
+        predict = paddle.nn.functional.sigmoid(raw_pred)
+        # update metrics
+        predict_2d = paddle.concat(x=[1 - predict, predict], axis=1)
+        metrics_list[0].update(preds=predict_2d.numpy(), labels=label.numpy())
+
+        print_dict = {'loss': cost}
+        return cost, metrics_list, print_dict
+
+    def infer_forward(self, metrics_list, batch_data, config):
+        raw_pred, aux_loss = self.forward(batch_data)
+        label = paddle.reshape(batch_data[4], [-1, 1])
+        predict = paddle.nn.functional.sigmoid(raw_pred)
+        predict_2d = paddle.concat(x=[1 - predict, predict], axis=1)
+        metrics_list[0].update(preds=predict_2d.numpy(), labels=label.numpy())
+
+        return metrics_list, None
+
+    def forward(self, batch):
+        hist_item_seq, hist_cat_seq, target_item, target_cat, label, mask, target_item_seq, target_cat_seq, \
+        neg_hist_item_seq, neg_hist_cat_seq = self.create_feeds(batch)
+
         # ------------------------- network data --------------------------
         # print("---neg_hist_cat_seq----",neg_hist_cat_seq)
         hist_item_emb = self.hist_item_emb_attr(hist_item_seq)
