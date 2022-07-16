@@ -1,18 +1,15 @@
+import logging
 import os
 import sys
 import time
-import logging
 
-import matplotlib.pyplot as plt
-import numpy as np
 import paddle
-from paddle.metric import Accuracy, Auc
-from paddle.nn import CrossEntropyLoss, NLLLoss
 from visualdl import LogWriter
-from utils.utils_single import load_yaml, create_data_loader, save_model, load_model
-from dataset import DinDataset, DienDataset
-import net.din
+
 import net.dien
+import net.din
+from dataset import DinDataset, DienDataset
+from utils.utils_single import load_yaml, create_data_loader, save_model, load_model
 
 model_dict = {
     "din": {
@@ -30,7 +27,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def train(config, model_method, train_dataloader, valid_loader, resume_train=False, EPOCHS=100, print_interval=100, tensor_print_dict=None, callback=None):
+# define metrics such as auc/acc
+# multi-task need to define multi metric
+def create_metrics():
+    metrics_list_name = ["auc"]
+    # auc_metric = paddle.metric.Auc(num_thresholds=self.bucket)
+    auc_metric = paddle.metric.Auc("ROC")
+    metrics_list = [auc_metric]
+    return metrics_list, metrics_list_name
+
+
+# define optimizer
+def create_optimizer(dy_model, config):
+    boundaries = [410000]
+    base_lr = config.get(
+        "hyper_parameters.optimizer.learning_rate_base_lr")
+    values = [base_lr, 0.2]
+    sgd_optimizer = paddle.optimizer.SGD(
+        learning_rate=paddle.optimizer.lr.PiecewiseDecay(
+            boundaries=boundaries, values=values),
+        parameters=dy_model.parameters())
+    return sgd_optimizer
+
+
+def train(config, model_method, train_dataloader, valid_loader, resume_train=False, EPOCHS=100, print_interval=100,
+          tensor_print_dict=None, callback=None):
     item_emb_size = config.get("hyper_parameters.item_emb_size", 64)
     cat_emb_size = config.get("hyper_parameters.cat_emb_size", 64)
     act = config.get("hyper_parameters.act", "sigmoid")
@@ -43,7 +64,7 @@ def train(config, model_method, train_dataloader, valid_loader, resume_train=Fal
     # model = paddle.Model(model_method(item_emb_size, cat_emb_size, act, is_sparse,
     #                                   use_DataLoader, item_count, cat_count))
     model = model_method(item_emb_size, cat_emb_size, act, is_sparse,
-                                      use_DataLoader, item_count, cat_count)
+                         use_DataLoader, item_count, cat_count)
 
     save_dir = config.get("runner.model_save_path", "checkpoint")
 
@@ -52,8 +73,8 @@ def train(config, model_method, train_dataloader, valid_loader, resume_train=Fal
         # model.load(os.path.join(save_dir, "final"), skip_mismatch=True)
 
     lr = config.get("hyper_parameters.optimizer.learning_rate_base_lr", 0.01)
-    optimizer = paddle.optimizer.SGD(learning_rate=lr, parameters=model.parameters())
-
+    # optimizer = paddle.optimizer.SGD(learning_rate=lr, parameters=model.parameters())
+    optimizer = paddle.optimizer.Adam(learning_rate=0.001, parameters=model.parameters())
     # 可视化观察网络结构
     # dataiter = iter(train_loader)
     # batch = dataiter.next()
@@ -90,7 +111,7 @@ def train(config, model_method, train_dataloader, valid_loader, resume_train=Fal
     model.train()
     for epoch_id in range(last_epoch_id + 1, EPOCHS):
         # set train mode
-        metric_list, metric_list_name = model.create_metrics()
+        metric_list, metric_list_name = create_metrics()
         # auc_metric = paddle.metric.Auc("ROC")
         epoch_begin = time.time()
         interval_begin = time.time()
@@ -185,7 +206,7 @@ def train(config, model_method, train_dataloader, valid_loader, resume_train=Fal
         #     save_model(
         #         model, optimizer, model_save_path, epoch_id, prefix='rec')
 
-    return model
+    # return model
 
 
 def test(config, model_method, test_dataloader, model=None, tensor_print_dict=None):
@@ -210,7 +231,7 @@ def test(config, model_method, test_dataloader, model=None, tensor_print_dict=No
     epoch_begin = time.time()
     interval_begin = time.time()
 
-    metric_list, metric_list_name = model.create_metrics()
+    metric_list, metric_list_name = create_metrics()
     step_num = 0
 
     for epoch_id in range(start_epoch, end_epoch):
@@ -282,6 +303,7 @@ def test(config, model_method, test_dataloader, model=None, tensor_print_dict=No
             time.time() - epoch_begin))
         epoch_begin = time.time()
 
+
 def main():
     if len(sys.argv) > 1:
         config = load_yaml(str(sys.argv[1]))
@@ -303,8 +325,6 @@ def main():
     Epoch = config.get("runner.epochs", 8)
 
     model = train(config, model_method, train_dataloader, test_dataloader, EPOCHS=Epoch, callback=callback)
-
-
 
 
 if __name__ == '__main__':
