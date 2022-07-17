@@ -214,10 +214,11 @@ class BST(paddle.nn.Layer):
                     mean=0.0,
                     std=init_value_ / math.sqrt(float(self.d_model)))))
 
-        self.GRU_layer = paddle.nn.GRU(
+        # bidirectional
+        self.GRU_layer = paddle.nn.LSTM(
             input_size=self.item_emb_size + self.cat_emb_size + self.position_emb_size,
             hidden_size=self.item_emb_size + self.cat_emb_size + self.position_emb_size,
-            num_layers=2)
+            num_layers=2, direction="bidirect")
 
         self._dnn_layers = []
         sizes = [d_model] + layer_sizes + [1]

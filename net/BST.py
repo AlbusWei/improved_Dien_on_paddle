@@ -1,11 +1,23 @@
+# Copyright (c) 2020 PaddlePaddle Authors. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import paddle
 import math
 from functools import partial
 
 import numpy as np
 
-
-# 改进版BST，思路是Transformer平行一个gru，同时提取全局依赖和短期依赖
 
 def create_model(config):
     item_emb_size = config.get("hyper_parameters.item_emb_size", 64)
@@ -213,11 +225,6 @@ class BST(paddle.nn.Layer):
                 initializer=paddle.nn.initializer.TruncatedNormal(
                     mean=0.0,
                     std=init_value_ / math.sqrt(float(self.d_model)))))
-
-        self.GRU_layer = paddle.nn.GRU(
-            input_size=self.item_emb_size + self.cat_emb_size + self.position_emb_size,
-            hidden_size=self.item_emb_size + self.cat_emb_size + self.position_emb_size,
-            num_layers=2)
 
         self._dnn_layers = []
         sizes = [d_model] + layer_sizes + [1]
@@ -482,9 +489,7 @@ class BST(paddle.nn.Layer):
         target_sequence = paddle.concat(
             [target_item_emb, target_cat_emb, target_position_emb], axis=2)
 
-        # Transformer encoder layer
         #print(position_sequence_target.shape)
-        # 256,430,288
         whole_embedding = paddle.concat(
             [item_sequence, target_sequence], axis=1)
         #print(whole_embedding)
@@ -496,13 +501,7 @@ class BST(paddle.nn.Layer):
         enc_output = self.encoder_layer(enc_output)
         enc_output = self.pre_post_process_layer(
             enc_output, self.preprocess_cmd, self.prepostprocess_dropout)
-
-        # 256,429,288
-        # Gru layer, only historical information needed
-        Gru_output = item_sequence
-        Gru_output = self.GRU_layer(Gru_output)
-
-        _concat = paddle.concat([user_emb, enc_output, Gru_output], axis=1)
+        _concat = paddle.concat([user_emb, enc_output], axis=1)
         dnn_input = _concat
         for n_layer in self._dnn_layers:
             dnn_input = n_layer(dnn_input)

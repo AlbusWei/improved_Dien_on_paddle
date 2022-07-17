@@ -17,6 +17,18 @@ def create_model(config):
                          use_DataLoader, item_count, cat_count)
     return din_model
 
+# define feeds which convert numpy of batch data to paddle.tensor
+def create_feeds(batch):
+    hist_item_seq = batch[0]
+    hist_cat_seq = batch[1]
+    target_item = batch[2]
+    target_cat = batch[3]
+    label = paddle.reshape(batch[4], [-1, 1])
+    mask = batch[5]
+    target_item_seq = batch[6]
+    target_cat_seq = batch[7]
+    return hist_item_seq, hist_cat_seq, target_item, target_cat, label, mask, target_item_seq, target_cat_seq
+
 
 class DINLayer(nn.Layer):
     def __init__(self, item_emb_size, cat_emb_size, act, is_sparse,
@@ -82,6 +94,7 @@ class DINLayer(nn.Layer):
             weight_attr=paddle.ParamAttr(
                 initializer=paddle.nn.initializer.Constant(value=0.0)))
 
+        # ------------------------- attention net --------------------------
         self.attention_layer = []
         sizes = [(self.item_emb_size + self.cat_emb_size) * 4
                  ] + [80] + [40] + [1]
@@ -137,18 +150,6 @@ class DINLayer(nn.Layer):
                 self.add_sublayer('act_%d' % i, act)
                 self.con_layer.append(act)
 
-    # define feeds which convert numpy of batch data to paddle.tensor
-    def create_feeds(self, batch):
-        hist_item_seq = batch[0]
-        hist_cat_seq = batch[1]
-        target_item = batch[2]
-        target_cat = batch[3]
-        label = paddle.reshape(batch[4], [-1, 1])
-        mask = batch[5]
-        target_item_seq = batch[6]
-        target_cat_seq = batch[7]
-        return hist_item_seq, hist_cat_seq, target_item, target_cat, label, mask, target_item_seq, target_cat_seq
-
     def train_forward(self, metrics_list, batch_data, config, loss_function=binary_cross_entropy_with_logits):
         label = paddle.reshape(batch_data[4], [-1, 1])
         raw_pred = self.forward(batch_data)
@@ -175,7 +176,7 @@ class DINLayer(nn.Layer):
 
     def forward(self, batch):
         hist_item_seq, hist_cat_seq, target_item, target_cat, label, mask, target_item_seq, target_cat_seq \
-            = self.create_feeds(batch)
+            = create_feeds(batch)
         hist_item_emb = self.hist_item_emb_attr(hist_item_seq)
         hist_cat_emb = self.hist_cat_emb_attr(hist_cat_seq)
         target_item_emb = self.target_item_emb_attr(target_item)
