@@ -88,4 +88,5 @@ def remap(review_dir, meta_dir, file):
 
 
 if __name__ == '__main__':
-    main()
+    # main()
+    remap("Books_5.json", "meta_Books.json", "Books")
